@@ -3,6 +3,7 @@ from audiobookdl import AudiobookFile, Chapter, logging, AudiobookMetadata, Cove
 from audiobookdl.exceptions import UserNotAuthorized, RequestError, DataNotPresent
 from typing import List, Optional, Sequence
 
+import os
 import io
 import re
 from PIL import Image
@@ -76,7 +77,8 @@ class ScribdSource(Source[str]):
         except DataNotPresent:
             raise UserNotAuthorized
         if book_id[:7] == "scribd_":
-            return self.download_scribd_original(book_id[:7], url)
+            #return self.download_scribd_original(book_id[:7], url)
+            return self.download_scribd_original(url_id, url)
         else:
             return self.download_normal_book(book_id, url)
 
@@ -98,18 +100,26 @@ class ScribdSource(Source[str]):
             "https://www.scribd.com/csrf_token",
             headers = { "href": url }
         )
-        jwt = self.find_in_page(url, r'(?<=("jwt_token":"))[^"]+')
-        stream_url = f"https://audio.production.scribd.com/audiobooks/{book_id}/192kbps.m3u8"
+        jwt_match = self.find_in_page(url, r'"token":"([^"]+)"')
+        token_match = re.search(r'"token":"([^"]+)"', jwt_match)
+        jwt = token_match.group(1)
+        stream_url = f"https://audio.production.scribd.com/audiobooks/{book_id}/96kbps.m3u8"
+        # Need to fix?
         title = self.find_in_page(url, r'(?:("title":"))([^"]+)')
         clean_title = self.clean_title(title)
         cover_url = self.find_in_page(url, r'(?<=("cover_url":"))[^"]+')
-        return Audiobook(
-            session = self._session,
-            files = self.get_stream_files(stream_url, headers = { "Authorization": jwt }),
-            # Does not have the normal metadata available
-            metadata = AudiobookMetadata(title),
-            cover = self.download_cover(cover_url, True),
-        )
+        existing_header = f"Authorization: {jwt}"
+
+        # This currently download an unencrypted mp4, without any tags. 
+        command = f'ffmpeg -headers "{existing_header}" -i {stream_url} -c copy output2.mp4'
+        os.system(command)
+        # return Audiobook(
+        #     session = self._session,
+        #     files = self.get_stream_files(stream_url, headers = { "Authorization": jwt }),
+        #     # Does not have the normal metadata available
+        #     metadata = AudiobookMetadata(title),
+        #     cover = self.download_cover(cover_url, True),
+        # )
 
 
     def download_normal_book(self, book_id: str, url: str) -> Audiobook:
